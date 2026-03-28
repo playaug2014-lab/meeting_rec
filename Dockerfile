@@ -20,15 +20,17 @@ RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key
 
 WORKDIR /app
 
-COPY package*.json ./
-RUN npm install --production
+COPY package.json ./
+RUN npm install --omit=dev
 
-COPY . .
+COPY server/ ./server/
+COPY public/ ./public/
 
 ENV CHROME_PATH=/usr/bin/google-chrome-stable
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
 ENV NODE_ENV=production
+ENV PORT=3000
 
 EXPOSE 3000
 
