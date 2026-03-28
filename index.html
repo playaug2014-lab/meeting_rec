@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>MeetScribe — AI Meeting Bot</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
+<style>
+:root{
+  --bg:#07070E;--s1:#0F0F1A;--s2:#161625;--s3:#1E1E30;
+  --border:rgba(255,255,255,0.06);--border2:rgba(255,255,255,0.12);
+  --accent:#5B5BD6;--accent2:#818CF8;--cyan:#22D3EE;
+  --green:#4ADE80;--amber:#FCD34D;--red:#F87171;--orange:#FB923C;
+  --text:#EDEDFF;--muted:#7878A0;--faint:#3A3A5A;
+  --head:'Syne',sans-serif;--body:'DM Sans',sans-serif;
+  --r:14px;--rs:8px;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--text);font-family:var(--body);font-size:14px;
+  line-height:1.6;min-height:100vh;overflow-x:hidden;}
+
+/* TOP BAR */
+.topbar{display:flex;align-items:center;justify-content:space-between;
+  padding:0 1.5rem;height:56px;background:var(--s1);border-bottom:1px solid var(--border);
+  position:sticky;top:0;z-index:50;}
+.logo{font-family:var(--head);font-size:20px;font-weight:800;
+  background:linear-gradient(135deg,#818CF8,#22D3EE);-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
+.server-status{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--muted);}
+.ss-dot{width:7px;height:7px;border-radius:50%;background:var(--muted);}
+.ss-dot.ok{background:var(--green);}
+.ss-dot.err{background:var(--red);}
+
+/* LAYOUT */
+.layout{display:grid;grid-template-columns:280px 1fr;height:calc(100vh - 56px);}
+
+/* SIDEBAR */
+.sidebar{background:var(--s1);border-right:1px solid var(--border);
+  display:flex;flex-direction:column;overflow-y:auto;overflow-x:hidden;}
+.sb-block{padding:1rem;border-bottom:1px solid var(--border);}
+.sb-label{font-size:10px;letter-spacing:1.5px;text-transform:uppercase;
+  color:var(--faint);margin-bottom:.75rem;font-weight:600;}
+
+/* URL Input */
+.url-input{width:100%;background:var(--s2);border:1px solid var(--border2);
+  border-radius:var(--rs);padding:9px 12px;color:var(--text);font-size:13px;
+  font-family:var(--body);outline:none;transition:border .2s;margin-bottom:8px;}
+.url-input:focus{border-color:var(--accent);}
+.url-input::placeholder{color:var(--faint);}
+
+/* Platform pills */
+.platform-row{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;}
+.p-pill{padding:7px 6px;border-radius:var(--rs);border:1px solid var(--border);
+  background:var(--s2);color:var(--muted);font-size:11px;font-weight:500;
+  cursor:pointer;text-align:center;transition:all .15s;font-family:var(--body);}
+.p-pill:hover{border-color:var(--border2);color:var(--text);}
+.p-pill.active{background:rgba(91,91,214,0.12);border-color:rgba(91,91,214,0.35);color:var(--accent2);}
+
+/* Language */
+.lang-row{display:flex;gap:6px;}
+.lang-btn{flex:1;padding:7px;border-radius:var(--rs);border:1px solid var(--border);
+  background:var(--s2);color:var(--muted);font-size:11px;cursor:pointer;
+  text-align:center;transition:all .15s;font-family:var(--body);}
+.lang-btn.active{background:rgba(91,91,214,0.12);border-color:rgba(91,91,214,0.35);color:var(--accent2);}
+
+/* Speakers */
+.spk-list{display:flex;flex-direction:column;gap:5px;margin-bottom:8px;}
+.spk-item{display:flex;align-items:center;gap:8px;padding:6px 8px;
+  border-radius:var(--rs);background:var(--s2);border:1px solid var(--border);}
+.spk-av{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;
+  justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;font-family:var(--head);}
+.spk-name{font-size:12px;font-weight:500;flex:1;}
+.spk-del{background:none;border:none;color:var(--faint);cursor:pointer;font-size:14px;padding:0 2px;}
+.spk-del:hover{color:var(--red);}
+.spk-add-row{display:flex;gap:6px;}
+.spk-input{flex:1;background:var(--s2);border:1px solid var(--border2);border-radius:var(--rs);
+  padding:6px 9px;color:var(--text);font-size:12px;font-family:var(--body);outline:none;transition:border .2s;}
+.spk-input:focus{border-color:var(--accent);}
+.spk-input::placeholder{color:var(--faint);}
+.spk-addbtn{background:var(--s3);border:1px solid var(--border2);border-radius:var(--rs);
+  padding:6px 10px;color:var(--text);font-size:16px;cursor:pointer;transition:background .15s;}
+.spk-addbtn:hover{background:var(--accent);}
+
+/* Stats */
+.stats-g{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+.stat-b{background:var(--s2);border-radius:var(--rs);padding:8px;text-align:center;}
+.stat-v{font-family:var(--head);font-size:20px;font-weight:700;}
+.stat-l{font-size:10px;color:var(--muted);margin-top:1px;}
+
+/* Past sessions */
+.session-list{flex:1;overflow-y:auto;}
+.session-item{padding:.75rem 1rem;border-bottom:1px solid var(--border);cursor:pointer;transition:background .15s;}
+.session-item:hover{background:var(--s2);}
+.si-platform{font-size:10px;color:var(--faint);margin-bottom:3px;}
+.si-title{font-size:12px;font-weight:600;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.si-meta{font-size:10px;color:var(--muted);}
+
+/* MAIN */
+.main{display:flex;flex-direction:column;overflow:hidden;}
+
+/* Control bar */
+.ctrl-bar{display:flex;align-items:center;gap:10px;padding:.875rem 1.25rem;
+  background:var(--s1);border-bottom:1px solid var(--border);flex-shrink:0;flex-wrap:wrap;}
+.btn-start{display:flex;align-items:center;gap:7px;background:var(--green);color:#000;
+  border:none;border-radius:var(--rs);padding:10px 20px;font-size:13px;font-weight:700;
+  cursor:pointer;font-family:var(--body);transition:all .2s;}
+.btn-start:hover{opacity:.85;}
+.btn-start.live{background:var(--red);color:#fff;}
+.btn-start:disabled{opacity:.4;cursor:not-allowed;}
+.rec-dot{width:7px;height:7px;border-radius:50%;background:currentColor;}
+.btn-start.live .rec-dot{animation:blink .8s infinite;}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+.btn-ctrl{background:var(--s2);color:var(--muted);border:1px solid var(--border);
+  border-radius:var(--rs);padding:9px 14px;font-size:12px;cursor:pointer;
+  font-family:var(--body);transition:all .15s;display:flex;align-items:center;gap:5px;}
+.btn-ctrl:hover{color:var(--text);border-color:var(--border2);}
+.btn-ctrl:disabled{opacity:.3;cursor:not-allowed;}
+.wave{display:none;align-items:flex-end;gap:2px;height:18px;}
+.wave.on{display:flex;}
+.wave span{display:block;width:2.5px;border-radius:1px;background:var(--accent);animation:wv .7s infinite ease-in-out;}
+.wave span:nth-child(2){animation-delay:.1s}.wave span:nth-child(3){animation-delay:.2s}
+.wave span:nth-child(4){animation-delay:.3s}.wave span:nth-child(5){animation-delay:.15s}
+@keyframes wv{0%,100%{height:3px}50%{height:15px}}
+.status-pill{margin-left:auto;display:flex;align-items:center;gap:6px;
+  background:var(--s2);border:1px solid var(--border);border-radius:99px;
+  padding:5px 14px;font-size:12px;color:var(--muted);}
+.status-pill .d{width:5px;height:5px;border-radius:50%;background:var(--muted);}
+.status-pill.live .d{background:var(--red);animation:pulse 1s infinite;}
+.status-pill.live{color:var(--text);}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+/* Transcript + Summary area */
+.content-area{flex:1;display:flex;overflow:hidden;}
+.transcript-panel{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+.panel-head{display:flex;align-items:center;justify-content:space-between;
+  padding:.65rem 1.25rem;border-bottom:1px solid var(--border);flex-shrink:0;}
+.panel-title{font-family:var(--head);font-size:13px;font-weight:700;}
+.tab-row{display:flex;gap:3px;}
+.tab{background:transparent;color:var(--muted);border:none;border-radius:5px;
+  padding:4px 10px;font-size:11px;cursor:pointer;font-family:var(--body);transition:all .15s;}
+.tab.active{background:var(--s3);color:var(--text);}
+.t-scroll{flex:1;overflow-y:auto;padding:1.25rem;
+  scrollbar-width:thin;scrollbar-color:var(--s3) transparent;}
+.empty-s{display:flex;flex-direction:column;align-items:center;justify-content:center;
+  height:100%;min-height:300px;gap:12px;color:var(--muted);}
+.empty-icon{font-size:48px;opacity:.2;}
+
+/* Transcript entries */
+.t-entry{display:flex;gap:10px;margin-bottom:1.25rem;animation:fadeUp .3s ease;}
+@keyframes fadeUp{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+.t-av{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;
+  justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;margin-top:2px;font-family:var(--head);}
+.t-body{flex:1;}
+.t-meta{display:flex;align-items:baseline;gap:8px;margin-bottom:4px;}
+.t-name{font-size:12px;font-weight:700;font-family:var(--head);}
+.t-time{font-size:10px;color:var(--muted);}
+.t-bubble{font-size:13px;line-height:1.65;color:rgba(237,237,255,.85);
+  background:var(--s2);border-radius:0 10px 10px 10px;padding:9px 13px;}
+.t-lang-badge{display:inline-block;font-size:9px;background:rgba(34,211,238,0.1);
+  color:var(--cyan);border:1px solid rgba(34,211,238,0.2);border-radius:4px;
+  padding:1px 6px;margin-left:6px;vertical-align:middle;}
+
+/* Summary panel */
+.sum-panel{display:none;padding:1.25rem;overflow-y:auto;flex:1;
+  scrollbar-width:thin;scrollbar-color:var(--s3) transparent;}
+.sum-panel.show{display:block;}
+.sum-loading{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:13px;padding:2rem 0;}
+.spin{width:18px;height:18px;border-radius:50%;border:2px solid var(--s3);
+  border-top-color:var(--accent);animation:spin .7s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg)}}
+.sum-sec{margin-bottom:1.5rem;}
+.sum-sec h3{font-family:var(--head);font-size:11px;font-weight:700;letter-spacing:.5px;
+  text-transform:uppercase;color:var(--muted);margin-bottom:.65rem;display:flex;align-items:center;gap:6px;}
+.sum-sec p,.sum-sec li{font-size:13px;line-height:1.7;color:rgba(237,237,255,.8);}
+.sum-sec ul{padding-left:1.1rem;}
+.sum-sec li{margin-bottom:5px;}
+.action-chip{display:inline-flex;align-items:center;gap:5px;
+  background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.2);
+  border-radius:6px;padding:5px 10px;font-size:12px;color:var(--green);margin:3px;}
+.sent-badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;
+  padding:3px 9px;border-radius:99px;margin-top:6px;}
+
+/* Export bar */
+.export-bar{display:flex;gap:6px;padding:.65rem 1.25rem;border-top:1px solid var(--border);flex-shrink:0;}
+.exp-btn{background:var(--s2);color:var(--muted);border:1px solid var(--border);
+  border-radius:6px;padding:6px 12px;font-size:11px;cursor:pointer;
+  font-family:var(--body);transition:all .15s;display:flex;align-items:center;gap:5px;}
+.exp-btn:hover{color:var(--text);border-color:var(--border2);}
+
+/* Bot status banner */
+.bot-banner{display:none;align-items:center;gap:10px;padding:.65rem 1.25rem;
+  background:rgba(91,91,214,0.08);border-bottom:1px solid rgba(91,91,214,0.2);
+  font-size:13px;flex-shrink:0;}
+.bot-banner.show{display:flex;}
+.bot-banner-icon{font-size:20px;}
+
+/* Notification */
+.notif{position:fixed;bottom:20px;right:20px;z-index:999;
+  background:var(--s2);border:1px solid var(--border2);border-radius:10px;
+  padding:10px 16px;font-size:12px;color:var(--text);
+  transform:translateY(60px);opacity:0;transition:all .3s;pointer-events:none;
+  display:flex;align-items:center;gap:7px;}
+.notif.show{transform:translateY(0);opacity:1;}
+
+@media(max-width:768px){.layout{grid-template-columns:1fr;}.sidebar{display:none;}}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="logo">MeetScribe Bot</div>
+  <div class="server-status">
+    <div class="ss-dot" id="serverDot"></div>
+    <span id="serverStatus">Connecting to server…</span>
+  </div>
+</div>
+
+<div class="layout">
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+
+    <!-- Meeting URL -->
+    <div class="sb-block">
+      <div class="sb-label">Meeting Link</div>
+      <input class="url-input" id="meetingUrl" placeholder="Paste Google Meet / Zoom / Teams link…"/>
+      <div class="platform-row">
+        <button class="p-pill active" onclick="setPlatform(this,'Google Meet')">📹 Google Meet</button>
+        <button class="p-pill" onclick="setPlatform(this,'Zoom')">🔵 Zoom</button>
+        <button class="p-pill" onclick="setPlatform(this,'Microsoft Teams')">🟣 MS Teams</button>
+        <button class="p-pill" onclick="setPlatform(this,'In-Person')">🎤 In-Person</button>
+      </div>
+    </div>
+
+    <!-- Language -->
+    <div class="sb-block">
+      <div class="sb-label">Transcription Language</div>
+      <div class="lang-row">
+        <button class="lang-btn active" onclick="setLang(this,'en-US')">English</button>
+        <button class="lang-btn" onclick="setLang(this,'hi-IN')">हिंदी</button>
+        <button class="lang-btn" onclick="setLang(this,'auto')">Auto / Mix</button>
+      </div>
+    </div>
+
+    <!-- Speakers -->
+    <div class="sb-block">
+      <div class="sb-label">Speakers in Meeting</div>
+      <div class="spk-list" id="spkList"></div>
+      <div class="spk-add-row">
+        <input class="spk-input" id="spkInput" placeholder="Add speaker name…" maxlength="30"/>
+        <button class="spk-addbtn" onclick="addSpeaker()">+</button>
+      </div>
+    </div>
+
+    <!-- Session Stats -->
+    <div class="sb-block">
+      <div class="sb-label">Session</div>
+      <div class="stats-g">
+        <div class="stat-b"><div class="stat-v" id="stDur">0:00</div><div class="stat-l">Duration</div></div>
+        <div class="stat-b"><div class="stat-v" id="stWords">0</div><div class="stat-l">Words</div></div>
+        <div class="stat-b"><div class="stat-v" id="stSegs">0</div><div class="stat-l">Segments</div></div>
+        <div class="stat-b"><div class="stat-v" id="stSpks">0</div><div class="stat-l">Speakers</div></div>
+      </div>
+    </div>
+
+    <!-- Past Sessions -->
+    <div class="sb-label" style="padding:.75rem 1rem .25rem">Past Sessions</div>
+    <div class="session-list" id="sessionList">
+      <div style="padding:1rem;font-size:12px;color:var(--faint)">No sessions yet</div>
+    </div>
+
+  </aside>
+
+  <!-- MAIN -->
+  <div class="main">
+
+    <!-- Bot banner -->
+    <div class="bot-banner" id="botBanner">
+      <span class="bot-banner-icon">🤖</span>
+      <span id="botBannerText">Bot is joining your meeting…</span>
+    </div>
+
+    <!-- Controls -->
+    <div class="ctrl-bar">
+      <button class="btn-start" id="startBtn" onclick="toggleSession()">
+        <span class="rec-dot"></span>
+        <span id="startBtnText">Start Bot</span>
+      </button>
+      <button class="btn-ctrl" id="sumBtn" onclick="getSummary()" disabled>✨ AI Summary</button>
+      <button class="btn-ctrl" onclick="clearSession()">🗑 Clear</button>
+      <div class="wave" id="waveAnim"><span></span><span></span><span></span><span></span><span></span></div>
+      <div class="status-pill" id="statusPill">
+        <div class="d"></div><span id="statusText">Ready</span>
+      </div>
+    </div>
+
+    <!-- Content -->
+    <div class="content-area">
+      <div class="transcript-panel">
+        <div class="panel-head">
+          <div class="panel-title">📝 Live Transcript</div>
+          <div class="tab-row">
+            <button class="tab active" onclick="switchTab('tr',this)">Transcript</button>
+            <button class="tab" onclick="switchTab('sum',this)">AI Summary</button>
+          </div>
+        </div>
+
+        <!-- Transcript -->
+        <div id="trView">
+          <div class="t-scroll" id="tScroll">
+            <div class="empty-s" id="emptyState">
+              <div class="empty-icon">🤖</div>
+              <div style="font-size:14px;font-weight:500">Paste a meeting link and click Start Bot</div>
+              <div style="font-size:12px;color:var(--faint);text-align:center;max-width:300px">The bot will join your Google Meet, Zoom, or Teams call and transcribe everyone's voice automatically</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Summary -->
+        <div id="sumView" style="display:none;flex:1;overflow:hidden;display:none;">
+          <div class="sum-panel show" id="sumPanel">
+            <div id="sumContent" style="color:var(--muted);font-size:13px;padding:1.5rem 0;text-align:center;">
+              Record a meeting then click <strong>✨ AI Summary</strong>
+            </div>
+          </div>
+        </div>
+
+        <!-- Export -->
+        <div class="export-bar">
+          <button class="exp-btn" onclick="exportTXT()">⬇ Export .TXT</button>
+          <button class="exp-btn" onclick="exportSRT()">⬇ Export .SRT</button>
+          <button class="exp-btn" onclick="copyAll()">📋 Copy All</button>
+          <button class="exp-btn" onclick="saveSession()">💾 Save</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="notif" id="notif"></div>
+
+<script>
+// ── CONFIG ──
+// Change this to your Render server URL after deploying
+const SERVER_URL = window.location.hostname === 'localhost'
+  ? 'http://localhost:3000'
+  : 'https://meetscribe-bot.onrender.com'; // ← UPDATE THIS after deploying on Render
+
+const WS_URL = SERVER_URL.replace('https://', 'wss://').replace('http://', 'ws://');
+
+// ── STATE ──
+const COLORS = [
+  {bg:'rgba(129,140,248,.15)',text:'#818CF8',av:'#4F46E5'},
+  {bg:'rgba(74,222,128,.15)',text:'#4ADE80',av:'#16A34A'},
+  {bg:'rgba(251,191,36,.15)',text:'#FCD34D',av:'#D97706'},
+  {bg:'rgba(248,113,113,.15)',text:'#F87171',av:'#DC2626'},
+  {bg:'rgba(34,211,238,.15)',text:'#22D3EE',av:'#0891B2'},
+];
+let speakers=[], lang='en-US', platform='Google Meet';
+let sessionId=null, ws=null, isLive=false;
+let transcript=[], wordCount=0, startTime=null, timerInt=null;
+let savedSessions=JSON.parse(localStorage.getItem('ms_bot_sessions')||'[]');
+
+// ── INIT ──
+document.getElementById('spkInput').onkeydown=e=>{if(e.key==='Enter')addSpeaker();};
+checkServer();
+renderSessionList();
+
+// ── SERVER HEALTH CHECK ──
+async function checkServer(){
+  try{
+    const r=await fetch(SERVER_URL+'/api/health',{signal:AbortSignal.timeout(8000)});
+    if(r.ok){
+      document.getElementById('serverDot').className='ss-dot ok';
+      document.getElementById('serverStatus').textContent='Server connected';
+    }
+  }catch{
+    document.getElementById('serverDot').className='ss-dot err';
+    document.getElementById('serverStatus').textContent='Server offline — check Render';
+  }
+}
+
+// ── SPEAKERS ──
+function addSpeaker(force){
+  const inp=document.getElementById('spkInput');
+  const name=force||inp.value.trim();
+  if(!name||speakers.find(s=>s.name===name))return inp.value='';
+  speakers.push({name,color:COLORS[speakers.length%COLORS.length]});
+  inp.value=''; renderSpeakers();
+  document.getElementById('stSpks').textContent=speakers.length;
+}
+function removeSpeaker(i){speakers.splice(i,1);renderSpeakers();document.getElementById('stSpks').textContent=speakers.length;}
+function renderSpeakers(){
+  const list=document.getElementById('spkList');list.innerHTML='';
+  speakers.forEach((s,i)=>{
+    const d=document.createElement('div');d.className='spk-item';
+    d.innerHTML=`<div class="spk-av" style="background:${s.color.av}30;color:${s.color.av}">${s.name[0].toUpperCase()}</div>
+      <span class="spk-name">${s.name}</span>
+      <button class="spk-del" onclick="removeSpeaker(${i})" title="Remove">×</button>`;
+    list.appendChild(d);
+  });
+}
+function setPlatform(el,name){document.querySelectorAll('.p-pill').forEach(p=>p.classList.remove('active'));el.classList.add('active');platform=name;}
+function setLang(el,l){document.querySelectorAll('.lang-btn').forEach(b=>b.classList.remove('active'));el.classList.add('active');lang=l;}
+
+// ── SESSION CONTROL ──
+async function toggleSession(){isLive?stopSession():startSession();}
+
+async function startSession(){
+  const url=document.getElementById('meetingUrl').value.trim();
+  if(!url){notif('Paste a meeting link first','e');return;}
+
+  setLive(true);
+  showBanner('🤖 Bot is starting and joining your meeting…');
+
+  try{
+    const res=await fetch(SERVER_URL+'/api/start',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({meetingUrl:url,platform,speakers:speakers.map(s=>s.name),language:lang})
+    });
+    const data=await res.json();
+    if(!data.sessionId){throw new Error(data.error||'Failed to start bot');}
+    sessionId=data.sessionId;
+    connectWebSocket(sessionId);
+    startTime=Date.now();
+    timerInt=setInterval(updateTimer,1000);
+    document.getElementById('emptyState').style.display='none';
+  }catch(err){
+    notif('Error: '+err.message,'e');
+    setLive(false);
+    hideBanner();
+  }
+}
+
+async function stopSession(){
+  setLive(false);
+  if(timerInt)clearInterval(timerInt);
+  hideBanner();
+  if(sessionId){
+    try{
+      await fetch(SERVER_URL+'/api/stop',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({sessionId})
+      });
+    }catch{}
+    document.getElementById('sumBtn').disabled=transcript.length===0;
+    notif('Recording stopped. Generate AI Summary!','s');
+  }
+  if(ws){ws.close();ws=null;}
+}
+
+// ── WEBSOCKET ──
+function connectWebSocket(sid){
+  ws=new WebSocket(`${WS_URL}?sessionId=${sid}`);
+  ws.onopen=()=>console.log('[WS] Connected');
+  ws.onmessage=(e)=>{
+    const msg=JSON.parse(e.data);
+    if(msg.type==='transcript')addEntry(msg.data);
+    else if(msg.type==='history')msg.data.forEach(addEntry);
+    else if(msg.type==='status')handleStatus(msg);
+    else if(msg.type==='summary')renderSummary(msg.data);
+    else if(msg.type==='error'){notif(msg.message,'e');setLive(false);hideBanner();}
+  };
+  ws.onclose=()=>console.log('[WS] Disconnected');
+  ws.onerror=()=>notif('WebSocket connection error','e');
+}
+
+function handleStatus(msg){
+  document.getElementById('statusText').textContent=msg.message||msg.status;
+  if(msg.status==='joined'){
+    hideBanner();
+    showBanner('🤖 Bot is live in the meeting — transcribing…');
+    notif('Bot joined the meeting!','s');
+  }
+  if(msg.status==='stopped'){hideBanner();}
+  if(msg.status==='summarizing'){
+    document.getElementById('sumContent').innerHTML=
+      '<div class="sum-loading"><div class="spin"></div> Generating AI summary…</div>';
+  }
+}
+
+// ── TRANSCRIPT ──
+function addEntry(entry){
+  const spk=speakers.find(s=>s.name===entry.speaker)||{name:entry.speaker,color:COLORS[transcript.length%COLORS.length]};
+  transcript.push(entry);
+  wordCount+=(entry.text?.split(' ').length||0);
+  document.getElementById('stWords').textContent=wordCount>999?Math.round(wordCount/1000)+'k':wordCount;
+  document.getElementById('stSegs').textContent=transcript.length;
+
+  const box=document.getElementById('tScroll');
+  const d=document.createElement('div');d.className='t-entry';
+  const isHindi=entry.language==='hi';
+  d.innerHTML=`
+    <div class="t-av" style="background:${spk.color.av}30;color:${spk.color.av}">${spk.name[0].toUpperCase()}</div>
+    <div class="t-body">
+      <div class="t-meta">
+        <span class="t-name" style="color:${spk.color.text}">${spk.name}</span>
+        <span class="t-time">${entry.time}</span>
+        ${isHindi?'<span class="t-lang-badge">HI</span>':''}
+      </div>
+      <div class="t-bubble">${entry.text}</div>
+    </div>`;
+  box.appendChild(d);
+  box.scrollTop=box.scrollHeight;
+}
+
+// ── SUMMARY ──
+async function getSummary(){
+  if(!transcript.length||!sessionId){notif('No transcript to summarize','e');return;}
+  switchTab('sum',document.querySelectorAll('.tab')[1]);
+  document.getElementById('sumContent').innerHTML='<div class="sum-loading"><div class="spin"></div> Generating AI summary…</div>';
+  try{
+    const r=await fetch(SERVER_URL+'/api/summary',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({sessionId})
+    });
+    const d=await r.json();
+    if(d.summary)renderSummary(d.summary);
+  }catch(err){
+    document.getElementById('sumContent').innerHTML=`<div style="color:var(--muted);font-size:13px">Error: ${err.message}</div>`;
+  }
+}
+
+function renderSummary(s){
+  const sentColor=s.sentiment==='positive'?'var(--green)':s.sentiment==='negative'?'var(--red)':'var(--amber)';
+  document.getElementById('sumContent').innerHTML=`
+    <div class="sum-sec">
+      <h3>📋 Overview</h3>
+      <p>${s.overview||'N/A'}</p>
+      <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
+        <span class="sent-badge" style="background:${sentColor}18;color:${sentColor};border:1px solid ${sentColor}30">● ${(s.sentiment||'neutral').toUpperCase()}</span>
+        ${s.meeting_type?`<span style="background:var(--s3);border-radius:6px;padding:3px 10px;font-size:11px;color:var(--muted)">${s.meeting_type}</span>`:''}
+      </div>
+    </div>
+    <div class="sum-sec">
+      <h3>💡 Key Points</h3>
+      <ul>${(s.key_points||[]).map(p=>`<li>${p}</li>`).join('')||'<li>None identified</li>'}</ul>
+    </div>
+    <div class="sum-sec">
+      <h3>✅ Decisions Made</h3>
+      <ul>${(s.decisions||[]).map(d=>`<li>${d}</li>`).join('')||'<li>No decisions recorded</li>'}</ul>
+    </div>
+    <div class="sum-sec">
+      <h3>⚡ Action Items</h3>
+      <div>${(s.action_items||[]).map(a=>{
+        const task=typeof a==='string'?a:`${a.task}${a.owner?' — '+a.owner:''}${a.due?' ('+a.due+')':''}`;
+        return `<span class="action-chip">✓ ${task}</span>`;
+      }).join('')||'<span style="color:var(--muted);font-size:13px">No action items</span>'}</div>
+    </div>
+    ${s.topics?.length?`<div class="sum-sec"><h3>📌 Topics Covered</h3><div style="display:flex;gap:6px;flex-wrap:wrap">${s.topics.map(t=>`<span style="background:var(--s3);border-radius:6px;padding:3px 10px;font-size:11px;color:var(--muted)">${t}</span>`).join('')}</div></div>`:''}`;
+}
+
+// ── HELPERS ──
+function setLive(on){
+  isLive=on;
+  const btn=document.getElementById('startBtn'),txt=document.getElementById('startBtnText');
+  const pill=document.getElementById('statusPill'),wave=document.getElementById('waveAnim');
+  if(on){btn.classList.add('live');txt.textContent='Stop Bot';pill.classList.add('live');
+    document.getElementById('statusText').textContent='Recording Live';wave.classList.add('on');}
+  else{btn.classList.remove('live');txt.textContent='Start Bot';pill.classList.remove('live');
+    document.getElementById('statusText').textContent='Stopped';wave.classList.remove('on');}
+}
+function showBanner(msg){
+  const b=document.getElementById('botBanner');
+  document.getElementById('botBannerText').textContent=msg;
+  b.classList.add('show');
+}
+function hideBanner(){document.getElementById('botBanner').classList.remove('show');}
+function updateTimer(){
+  if(!startTime)return;
+  const s=Math.floor((Date.now()-startTime)/1000),m=Math.floor(s/60);
+  document.getElementById('stDur').textContent=m+':'+(s%60+'').padStart(2,'0');
+}
+function switchTab(t,el){
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));el.classList.add('active');
+  document.getElementById('trView').style.display=t==='tr'?'flex':'none';
+  document.getElementById('sumView').style.display=t==='sum'?'flex':'none';
+  if(t==='tr')document.getElementById('trView').style.display='block';
+}
+function clearSession(){
+  transcript=[];wordCount=0;startTime=null;
+  clearInterval(timerInt);
+  document.getElementById('stDur').textContent='0:00';
+  document.getElementById('stWords').textContent='0';
+  document.getElementById('stSegs').textContent='0';
+  const box=document.getElementById('tScroll');
+  box.querySelectorAll('.t-entry').forEach(e=>e.remove());
+  document.getElementById('emptyState').style.display='flex';
+  document.getElementById('sumBtn').disabled=true;
+  document.getElementById('sumContent').innerHTML='Record a meeting then click <strong>✨ AI Summary</strong>';
+  notif('Session cleared','s');
+}
+function saveSession(){
+  if(!transcript.length){notif('Nothing to save','e');return;}
+  const s={id:Date.now(),platform,date:new Date().toISOString(),
+    words:wordCount,segments:transcript.length,transcript:[...transcript],speakers:speakers.map(s=>s.name)};
+  savedSessions.unshift(s);
+  localStorage.setItem('ms_bot_sessions',JSON.stringify(savedSessions.slice(0,30)));
+  renderSessionList();notif('Session saved!','s');
+}
+function renderSessionList(){
+  const list=document.getElementById('sessionList');
+  if(!savedSessions.length){list.innerHTML='<div style="padding:1rem;font-size:12px;color:var(--faint)">No sessions yet</div>';return;}
+  list.innerHTML=savedSessions.slice(0,10).map(s=>`
+    <div class="session-item" onclick="loadSession(${s.id})">
+      <div class="si-platform">${s.platform||'Meeting'}</div>
+      <div class="si-title">${new Date(s.date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})}</div>
+      <div class="si-meta">${s.words} words · ${s.segments} segments</div>
+    </div>`).join('');
+}
+function loadSession(id){
+  const s=savedSessions.find(x=>x.id===id);if(!s)return;
+  clearSession();
+  transcript=[...s.transcript];wordCount=s.words;
+  document.getElementById('emptyState').style.display='none';
+  const box=document.getElementById('tScroll');
+  s.transcript.forEach(e=>{
+    const spk=s.speakers?.includes(e.speaker)?{name:e.speaker,color:COLORS[s.transcript.indexOf(e)%COLORS.length]}:{name:e.speaker,color:COLORS[0]};
+    const d=document.createElement('div');d.className='t-entry';
+    d.innerHTML=`<div class="t-av" style="background:${spk.color.av}30;color:${spk.color.av}">${spk.name[0].toUpperCase()}</div>
+      <div class="t-body"><div class="t-meta"><span class="t-name" style="color:${spk.color.text}">${spk.name}</span><span class="t-time">${e.time}</span></div>
+      <div class="t-bubble">${e.text}</div></div>`;
+    box.appendChild(d);
+  });
+  document.getElementById('stWords').textContent=s.words;
+  document.getElementById('stSegs').textContent=s.segments;
+  document.getElementById('sumBtn').disabled=false;
+  notif('Session loaded','s');
+}
+function exportTXT(){
+  if(!transcript.length){notif('Nothing to export','e');return;}
+  const t=transcript.map(e=>`[${e.time}] ${e.speaker}: ${e.text}`).join('\n');
+  dl('meetscribe_'+ds()+'.txt',t);notif('Exported .TXT','s');
+}
+function exportSRT(){
+  if(!transcript.length){notif('Nothing to export','e');return;}
+  let s='';transcript.forEach((e,i)=>{const sec=i*5;s+=`${i+1}\n${st(sec)} --> ${st(sec+5)}\n${e.speaker}: ${e.text}\n\n`;});
+  dl('meetscribe_'+ds()+'.srt',s);notif('Exported .SRT','s');
+}
+function copyAll(){if(!transcript.length){notif('Nothing to copy','e');return;}
+  navigator.clipboard.writeText(transcript.map(e=>`[${e.time}] ${e.speaker}: ${e.text}`).join('\n')).then(()=>notif('Copied!','s'));}
+function st(s){const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sc=s%60;return `${pad(h)}:${pad(m)}:${pad(sc)},000`;}
+function pad(n){return(n+'').padStart(2,'0');}
+function ds(){return new Date().toISOString().slice(0,10);}
+function dl(name,content){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([content],{type:'text/plain'}));a.download=name;a.click();}
+function notif(msg,type='s'){
+  const n=document.getElementById('notif');
+  n.innerHTML=`<span style="color:${type==='s'?'var(--green)':'var(--red)'}">${type==='s'?'✓':'✕'}</span> ${msg}`;
+  n.className='notif show';setTimeout(()=>n.className='notif',3000);
+}
+</script>
+</body>
+</html>
