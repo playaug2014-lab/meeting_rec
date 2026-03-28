@@ -1,7 +1,4 @@
 // server/botManager.js
-// Uses Puppeteer to launch a headless Chrome that joins the meeting
-// and captures audio from the tab using the Web Audio API
-
 const puppeteer = require('puppeteer');
 
 class BotManager {
@@ -12,6 +9,8 @@ class BotManager {
     this.page = null;
     this.audioCallback = null;
     this.isRecording = false;
+    this._audioInterval = null;
+    this._errCount = 0;
   }
 
   async join() {
@@ -19,204 +18,219 @@ class BotManager {
 
     this.browser = await puppeteer.launch({
       headless: 'new',
-      executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome-stable',
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
         '--disable-gpu',
-        '--disable-web-security',
-        '--use-fake-ui-for-media-stream',   // auto-grant mic/camera
+        '--no-first-run',
+        '--no-zygote',
+        '--disable-extensions',
+        '--disable-blink-features=AutomationControlled',
+        '--use-fake-ui-for-media-stream',
         '--use-fake-device-for-media-stream',
         '--allow-running-insecure-content',
         '--autoplay-policy=no-user-gesture-required',
-        '--enable-usermedia-screen-capturing',
         '--window-size=1280,720',
-        // Use real audio capture (not fake) for actual meetings
-        `--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36`
+        '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
       ],
       defaultViewport: { width: 1280, height: 720 }
     });
 
     this.page = await this.browser.newPage();
 
-    // Grant permissions
-    const context = this.browser.defaultBrowserContext();
-    await context.overridePermissions(new URL(this.meetingUrl).origin, [
-      'microphone', 'camera', 'notifications'
-    ]);
+    // Hide bot detection flags
+    await this.page.evaluateOnNewDocument(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => false });
+      Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
+      window.chrome = { runtime: {} };
+    });
 
-    // Navigate to meeting
-    await this.page.goto(this.meetingUrl, { waitUntil: 'networkidle2', timeout: 60000 });
-
-    // Platform-specific join actions
-    if (this.platform === 'Google Meet' || this.meetingUrl.includes('meet.google.com')) {
-      await this._joinGoogleMeet();
-    } else if (this.platform === 'Zoom' || this.meetingUrl.includes('zoom.us')) {
-      await this._joinZoom();
-    } else if (this.platform === 'Microsoft Teams' || this.meetingUrl.includes('teams.microsoft.com')) {
-      await this._joinTeams();
+    // Grant mic + camera permissions
+    try {
+      const origin = new URL(this.meetingUrl).origin;
+      await this.browser.defaultBrowserContext().overridePermissions(origin, [
+        'microphone', 'camera', 'notifications'
+      ]);
+    } catch (e) {
+      console.warn('[Bot] Permission warning:', e.message);
     }
 
-    // Start audio capture via injected Web Audio API script
-    await this._startAudioCapture();
+    // Navigate to meeting
+    try {
+      await this.page.goto(this.meetingUrl, {
+        waitUntil: 'domcontentloaded',
+        timeout: 60000
+      });
+    } catch (e) {
+      console.warn('[Bot] Navigation warning (continuing):', e.message);
+    }
 
-    console.log('[Bot] Successfully joined meeting and started audio capture');
+    await this._wait(4000);
+    console.log('[Bot] Page loaded:', this.page.url());
+
+    await this._joinGoogleMeet();
+    await this._startAudioCapture();
+    console.log('[Bot] Bot is live');
   }
 
   async _joinGoogleMeet() {
     console.log('[Bot] Joining Google Meet...');
     try {
-      // Dismiss "Sign in" if present — continue as guest
-      await this.page.waitForSelector('input[data-initial-value]', { timeout: 5000 })
-        .then(async el => {
-          await el.type('MeetScribe Bot');
-        }).catch(() => {});
+      await this._wait(3000);
 
-      // Click "Continue without signing in" or "Ask to join"
-      const btns = [
-        'button[data-idom-class="nCP5yc AjY5Oe DuMIQc LQeN7 Yils2d"]',
-        '[data-tooltip="Ask to join"]',
+      // Type name if input exists
+      try {
+        const nameInput = await this.page.$('input[placeholder*="name"], [jsname="YPqjbf"]');
+        if (nameInput) {
+          await nameInput.click({ clickCount: 3 });
+          await nameInput.type('MeetScribe Bot', { delay: 80 });
+          await this._wait(1000);
+        }
+      } catch (e) {}
+
+      // Press Escape to dismiss any popups
+      try { await this.page.keyboard.press('Escape'); await this._wait(500); } catch (e) {}
+
+      // Try clicking join button up to 10 times
+      const joinSelectors = [
+        '[data-promo-anchor-id="yaqOZe"]',
         'button[jsname="Qx7uuf"]',
+        '[jsname="V67aGc"]',
+        '[aria-label="Join now"]',
+        '[aria-label="Ask to join"]',
       ];
-      for (const sel of btns) {
+
+      let joined = false;
+      for (let attempt = 0; attempt < 10; attempt++) {
+        // Try known selectors
+        for (const sel of joinSelectors) {
+          try {
+            const btn = await this.page.$(sel);
+            if (btn) {
+              await btn.click();
+              console.log(`[Bot] Clicked: ${sel}`);
+              joined = true;
+              break;
+            }
+          } catch (e) {}
+        }
+        if (joined) break;
+
+        // Try finding button by text content
         try {
-          await this.page.waitForSelector(sel, { timeout: 4000 });
-          await this.page.click(sel);
-          break;
-        } catch {}
+          const clicked = await this.page.evaluate(() => {
+            const btns = Array.from(document.querySelectorAll('button, [role="button"]'));
+            const b = btns.find(el => {
+              const t = (el.textContent || '').toLowerCase().trim();
+              return t === 'join now' || t === 'ask to join' || t === 'join';
+            });
+            if (b) { b.click(); return true; }
+            return false;
+          });
+          if (clicked) { console.log('[Bot] Clicked join via text'); joined = true; break; }
+        } catch (e) {}
+
+        console.log(`[Bot] Attempt ${attempt + 1}: waiting for join button...`);
+        await this._wait(2000);
       }
 
-      // Mute mic and camera (we are just listening)
-      await this._safeClick('[data-tooltip*="microphone"]');
-      await this._safeClick('[data-tooltip*="camera"]');
-
-      // Click "Join now" or "Ask to join"
-      await this._safeClick('[data-promo-anchor-id="yaqOZe"]');
-      await this._safeClick('button[jsname="Qx7uuf"]');
-
-      await this.page.waitForTimeout(3000);
-      console.log('[Bot] Google Meet joined');
+      await this._wait(5000);
+      console.log('[Bot] Join complete. URL:', this.page.url());
     } catch (err) {
-      console.warn('[Bot] Google Meet join warning:', err.message);
+      console.warn('[Bot] Join error (continuing):', err.message);
     }
-  }
-
-  async _joinZoom() {
-    console.log('[Bot] Joining Zoom...');
-    try {
-      // Click "Join from browser" link
-      await this.page.waitForSelector('a#btnJoinMeeting, a.preview-join-btn', { timeout: 8000 });
-      await this._safeClick('a#btnJoinMeeting, a.preview-join-btn');
-      await this.page.waitForTimeout(2000);
-
-      // Enter name if prompted
-      const nameInput = await this.page.$('#inputname');
-      if (nameInput) {
-        await nameInput.type('MeetScribe Bot');
-        await this._safeClick('#joinBtn');
-      }
-      console.log('[Bot] Zoom joined');
-    } catch (err) {
-      console.warn('[Bot] Zoom join warning:', err.message);
-    }
-  }
-
-  async _joinTeams() {
-    console.log('[Bot] Joining MS Teams...');
-    try {
-      await this.page.waitForSelector('[data-tid="prejoin-join-button"], .ts-btn-primary', { timeout: 10000 });
-      await this._safeClick('[data-tid="prejoin-join-button"], .ts-btn-primary');
-      await this.page.waitForTimeout(3000);
-      console.log('[Bot] Teams joined');
-    } catch (err) {
-      console.warn('[Bot] Teams join warning:', err.message);
-    }
-  }
-
-  async _safeClick(selector) {
-    try {
-      await this.page.waitForSelector(selector, { timeout: 3000 });
-      await this.page.click(selector);
-    } catch {}
   }
 
   async _startAudioCapture() {
-    console.log('[Bot] Starting audio capture via Web Audio API...');
-
-    // Inject audio capture script into the page
-    // This captures all audio playing on the page (meeting participants)
-    await this.page.evaluate(() => {
-      window._audioChunks = [];
-      window._mediaRecorder = null;
-
-      const ctx = new AudioContext();
-      const dest = ctx.createMediaStreamDestination();
-
-      // Capture all audio elements and media streams on the page
-      function hookAudio() {
-        // Hook into all audio/video elements
-        document.querySelectorAll('audio, video').forEach(el => {
-          try {
-            const src = ctx.createMediaElementSource(el);
-            src.connect(dest);
-            src.connect(ctx.destination); // Still play audio to keep meeting working
-          } catch {}
-        });
-      }
-      hookAudio();
-
-      // Watch for new audio/video elements (participants joining)
-      const obs = new MutationObserver(hookAudio);
-      obs.observe(document.body, { childList: true, subtree: true });
-
-      // Also capture the page's getUserMedia stream
-      const origGetUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
-      navigator.mediaDevices.getUserMedia = async (constraints) => {
-        const stream = await origGetUserMedia(constraints);
-        stream.getAudioTracks().forEach(track => {
-          const src = ctx.createMediaStreamSource(new MediaStream([track]));
-          src.connect(dest);
-        });
-        return stream;
-      };
-
-      // Record audio in 5-second chunks
-      const recorder = new MediaRecorder(dest.stream, { mimeType: 'audio/webm;codecs=opus' });
-      window._mediaRecorder = recorder;
-
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
-          window._audioChunks.push(e.data);
-        }
-      };
-
-      recorder.start(5000); // chunk every 5 seconds
-    });
-
-    // Poll audio chunks from the page every 5 seconds and send to transcriber
+    console.log('[Bot] Starting audio capture...');
     this.isRecording = true;
+
+    try {
+      await this.page.evaluate(() => {
+        window._msChunks = [];
+
+        try {
+          const ctx = new AudioContext();
+          const dest = ctx.createMediaStreamDestination();
+
+          function hookMedia() {
+            document.querySelectorAll('audio, video').forEach(el => {
+              if (el._msHooked) return;
+              el._msHooked = true;
+              try {
+                const src = ctx.createMediaElementSource(el);
+                src.connect(dest);
+                src.connect(ctx.destination);
+              } catch (e) {}
+            });
+          }
+          hookMedia();
+
+          new MutationObserver(hookMedia).observe(document.body, { childList: true, subtree: true });
+
+          const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+            ? 'audio/webm;codecs=opus' : 'audio/webm';
+
+          const recorder = new MediaRecorder(dest.stream, { mimeType });
+          recorder.ondataavailable = (e) => {
+            if (e.data && e.data.size > 500) window._msChunks.push(e.data);
+          };
+          recorder.start(5000);
+          console.log('[MeetScribe] Recorder started');
+        } catch (err) {
+          console.error('[MeetScribe] Recorder error:', err);
+        }
+      });
+    } catch (e) {
+      console.warn('[Bot] Audio inject warning:', e.message);
+    }
+
+    // Poll every 5 seconds
     this._audioInterval = setInterval(async () => {
-      if (!this.isRecording || !this.page) return;
+      if (!this.isRecording) return;
+
+      // Stop if page closed
+      if (!this.page || this.page.isClosed()) {
+        clearInterval(this._audioInterval);
+        return;
+      }
+
       try {
         const chunk = await this.page.evaluate(() => {
-          if (window._audioChunks.length === 0) return null;
-          const blob = window._audioChunks.shift();
-          return new Promise(res => {
-            const reader = new FileReader();
-            reader.onloadend = () => res(reader.result);
-            reader.readAsDataURL(blob);
+          if (!window._msChunks || !window._msChunks.length) return null;
+          const blob = window._msChunks.shift();
+          if (!blob) return null;
+          return new Promise((res, rej) => {
+            const r = new FileReader();
+            r.onloadend = () => res(r.result);
+            r.onerror = () => rej('read error');
+            r.readAsDataURL(blob);
           });
         });
 
         if (chunk && this.audioCallback) {
-          // Convert base64 dataURL to Buffer
           const base64 = chunk.split(',')[1];
-          const buffer = Buffer.from(base64, 'base64');
-          this.audioCallback(buffer);
+          if (base64) {
+            const buffer = Buffer.from(base64, 'base64');
+            if (buffer.length > 500) this.audioCallback(buffer);
+          }
         }
       } catch (err) {
-        console.warn('[Bot] Audio poll error:', err.message);
+        this._errCount++;
+        // Only log every 10th error to avoid spam
+        if (this._errCount % 10 === 1) {
+          console.warn('[Bot] Audio poll error:', err.message);
+        }
+        // If page is destroyed, stop polling
+        if (err.message && (
+          err.message.includes('destroyed') ||
+          err.message.includes('detached') ||
+          err.message.includes('closed')
+        )) {
+          clearInterval(this._audioInterval);
+        }
       }
     }, 5000);
   }
@@ -228,16 +242,36 @@ class BotManager {
   async leave() {
     console.log('[Bot] Leaving meeting...');
     this.isRecording = false;
-    if (this._audioInterval) clearInterval(this._audioInterval);
+
+    if (this._audioInterval) {
+      clearInterval(this._audioInterval);
+      this._audioInterval = null;
+    }
+
     try {
-      // Click leave/end button
-      await this._safeClick('[data-tooltip*="Leave"], [aria-label*="Leave"], .leave-meeting-btn');
-    } catch {}
+      if (this.page && !this.page.isClosed()) {
+        await this.page.evaluate(() => {
+          const btns = Array.from(document.querySelectorAll('button, [role="button"]'));
+          const leaveBtn = btns.find(b => {
+            const t = ((b.textContent || '') + (b.getAttribute('aria-label') || '')).toLowerCase();
+            return t.includes('leave') || t.includes('end call');
+          });
+          if (leaveBtn) leaveBtn.click();
+        }).catch(() => {});
+        await this._wait(1000);
+        await this.page.close().catch(() => {});
+      }
+    } catch (e) {}
+
     try {
-      if (this.page) await this.page.close();
-      if (this.browser) await this.browser.close();
-    } catch {}
+      if (this.browser) await this.browser.close().catch(() => {});
+    } catch (e) {}
+
     console.log('[Bot] Browser closed');
+  }
+
+  _wait(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 }
 
